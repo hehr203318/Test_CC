@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>尼姆游戏</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
+      color: #f8fafc;
+    }
+
+    .subtitle {
+      font-size: 0.85rem;
+      color: #64748b;
+      margin-bottom: 28px;
+    }
+
+    .status-bar {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 12px 24px;
+      margin-bottom: 28px;
+      font-size: 1rem;
+      font-weight: 600;
+      min-width: 320px;
+      text-align: center;
+      transition: all 0.3s;
+    }
+
+    .status-bar.player-turn { border-color: #3b82f6; color: #93c5fd; }
+    .status-bar.ai-turn    { border-color: #f59e0b; color: #fcd34d; }
+    .status-bar.win        { border-color: #22c55e; color: #86efac; }
+    .status-bar.lose       { border-color: #ef4444; color: #fca5a5; }
+
+    .piles {
+      display: flex;
+      gap: 32px;
+      margin-bottom: 32px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .pile-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .pile-label {
+      font-size: 0.8rem;
+      color: #64748b;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .stones {
+      display: grid;
+      grid-template-columns: repeat(3, 36px);
+      gap: 8px;
+      min-height: 120px;
+      align-content: start;
+    }
+
+    .stone {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, #94a3b8, #475569);
+      box-shadow: 0 2px 6px rgba(0,0,0,0.4), inset 0 1px 2px rgba(255,255,255,0.15);
+      transition: transform 0.15s, opacity 0.15s;
+    }
+
+    .stone.selected {
+      background: radial-gradient(circle at 35% 35%, #60a5fa, #2563eb);
+      box-shadow: 0 2px 8px rgba(59,130,246,0.5), inset 0 1px 2px rgba(255,255,255,0.2);
+      transform: scale(1.1);
+    }
+
+    .pile-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-small {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      border: 1px solid #334155;
+      background: #1e293b;
+      color: #e2e8f0;
+      font-size: 1.1rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.15s, border-color 0.15s;
+    }
+
+    .btn-small:hover:not(:disabled) { background: #334155; border-color: #475569; }
+    .btn-small:disabled { opacity: 0.3; cursor: not-allowed; }
+
+    .take-count {
+      font-size: 1rem;
+      font-weight: 700;
+      min-width: 24px;
+      text-align: center;
+      color: #3b82f6;
+    }
+
+    .pile-count {
+      font-size: 0.85rem;
+      color: #94a3b8;
+    }
+
+    .actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 8px;
+    }
+
+    .btn {
+      padding: 10px 28px;
+      border-radius: 8px;
+      border: none;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .btn-primary {
+      background: #3b82f6;
+      color: #fff;
+    }
+    .btn-primary:hover:not(:disabled) { background: #2563eb; }
+    .btn-primary:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    .btn-secondary {
+      background: #1e293b;
+      color: #94a3b8;
+      border: 1px solid #334155;
+    }
+    .btn-secondary:hover { background: #334155; }
+
+    .rules {
+      margin-top: 36px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 16px 24px;
+      max-width: 480px;
+      font-size: 0.82rem;
+      color: #64748b;
+      line-height: 1.7;
+    }
+
+    .rules strong { color: #94a3b8; }
+
+    .ai-indicator {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #f59e0b;
+      margin-right: 6px;
+      animation: pulse 1s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    .difficulty {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+
+    .diff-btn {
+      padding: 6px 16px;
+      border-radius: 6px;
+      border: 1px solid #334155;
+      background: #1e293b;
+      color: #64748b;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .diff-btn.active {
+      border-color: #3b82f6;
+      background: #1d4ed8;
+      color: #bfdbfe;
+    }
+  </style>
+</head>
+<body>
+
+<h1>尼姆游戏</h1>
+<p class="subtitle">Nim Game — 取走最后一颗石子者胜</p>
+
+<div class="difficulty">
+  <button class="diff-btn active" onclick="setDifficulty('hard')">困难（最优AI）</button>
+  <button class="diff-btn" onclick="setDifficulty('easy')">简单（随机AI）</button>
+</div>
+
+<div class="status-bar player-turn" id="status">你的回合 — 从任意一堆中取走若干颗石子</div>
+
+<div class="piles" id="piles"></div>
+
+<div class="actions">
+  <button class="btn btn-primary" id="confirmBtn" onclick="confirmMove()" disabled>确认取走</button>
+  <button class="btn btn-secondary" onclick="resetGame()">重新开始</button>
+</div>
+
+<div class="rules">
+  <strong>规则：</strong>共有三堆石子。每次从 <strong>一堆</strong> 中取走 <strong>至少一颗</strong>，可以取走整堆。
+  轮流进行，取走最后一颗石子的玩家 <strong>获胜</strong>。
+</div>
+
+<script>
+  const INITIAL_PILES = [5, 7, 9];
+  let piles = [];
+  let selected = []; // selected[i] = 本回合从第 i 堆要取的数量
+  let playerTurn = true;
+  let gameOver = false;
+  let difficulty = 'hard';
+
+  function setDifficulty(d) {
+    difficulty = d;
+    document.querySelectorAll('.diff-btn').forEach(b => b.classList.remove('active'));
+    event.target.classList.add('active');
+    resetGame();
+  }
+
+  function resetGame() {
+    piles = [...INITIAL_PILES];
+    selected = [0, 0, 0];
+    playerTurn = true;
+    gameOver = false;
+    setStatus('player-turn', '你的回合 — 从任意一堆中取走若干颗石子');
+    document.getElementById('confirmBtn').disabled = true;
+    renderPiles();
+  }
+
+  function renderPiles() {
+    const container = document.getElementById('piles');
+    container.innerHTML = '';
+
+    piles.forEach((count, pileIdx) => {
+      const div = document.createElement('div');
+      div.className = 'pile-container';
+
+      const label = document.createElement('div');
+      label.className = 'pile-label';
+      label.textContent = `第 ${pileIdx + 1} 堆`;
+
+      const stonesDiv = document.createElement('div');
+      stonesDiv.className = 'stones';
+
+      for (let i = 0; i < count; i++) {
+        const stone = document.createElement('div');
+        const isSelected = i >= (count - selected[pileIdx]);
+        stone.className = 'stone' + (isSelected ? ' selected' : '');
+        stonesDiv.appendChild(stone);
+      }
+
+      const controls = document.createElement('div');
+      controls.className = 'pile-controls';
+
+      const btnMinus = document.createElement('button');
+      btnMinus.className = 'btn-small';
+      btnMinus.textContent = '−';
+      btnMinus.disabled = !playerTurn || gameOver || selected[pileIdx] === 0;
+      btnMinus.onclick = () => adjustSelection(pileIdx, -1);
+
+      const takeCount = document.createElement('div');
+      takeCount.className = 'take-count';
+      takeCount.textContent = selected[pileIdx] || '0';
+
+      const btnPlus = document.createElement('button');
+      btnPlus.className = 'btn-small';
+      btnPlus.textContent = '+';
+      btnPlus.disabled = !playerTurn || gameOver || selected[pileIdx] >= count;
+      btnPlus.onclick = () => adjustSelection(pileIdx, 1);
+
+      const pileCount = document.createElement('div');
+      pileCount.className = 'pile-count';
+      pileCount.textContent = `${count} 颗`;
+
+      controls.append(btnMinus, takeCount, btnPlus);
+      div.append(label, stonesDiv, controls, pileCount);
+      container.appendChild(div);
+    });
+  }
+
+  function adjustSelection(pileIdx, delta) {
+    // 只允许从一堆取
+    const otherSelected = selected.some((v, i) => i !== pileIdx && v > 0);
+    if (delta > 0 && otherSelected) return;
+
+    const newVal = selected[pileIdx] + delta;
+    if (newVal < 0 || newVal > piles[pileIdx]) return;
+    selected[pileIdx] = newVal;
+
+    const totalSelected = selected.reduce((a, b) => a + b, 0);
+    document.getElementById('confirmBtn').disabled = totalSelected === 0;
+    renderPiles();
+  }
+
+  function confirmMove() {
+    if (!playerTurn || gameOver) return;
+    const totalSelected = selected.reduce((a, b) => a + b, 0);
+    if (totalSelected === 0) return;
+
+    applyMove(selected);
+    selected = [0, 0, 0];
+
+    if (checkWin()) {
+      setStatus('win', '你赢了！恭喜！取走了最后一颗石子');
+      gameOver = true;
+      renderPiles();
+      document.getElementById('confirmBtn').disabled = true;
+      return;
+    }
+
+    playerTurn = false;
+    setStatus('ai-turn', '<span class="ai-indicator"></span>AI 正在思考…');
+    document.getElementById('confirmBtn').disabled = true;
+    renderPiles();
+
+    setTimeout(aiMove, 800);
+  }
+
+  function applyMove(move) {
+    move.forEach((take, i) => { piles[i] -= take; });
+  }
+
+  function checkWin() {
+    return piles.every(p => p === 0);
+  }
+
+  // Nim 最优策略：XOR-sum == 0 时处于必败态
+  function nimOptimalMove() {
+    const xorSum = piles.reduce((a, b) => a ^ b, 0);
+    if (xorSum === 0) {
+      // 已处于必败态，随机取一颗
+      const nonEmpty = piles.map((v, i) => i).filter(i => piles[i] > 0);
+      const i = nonEmpty[Math.floor(Math.random() * nonEmpty.length)];
+      const move = [0, 0, 0];
+      move[i] = 1;
+      return move;
+    }
+    // 找到能让 xorSum == 0 的移动
+    for (let i = 0; i < piles.length; i++) {
+      const target = piles[i] ^ xorSum;
+      if (target < piles[i]) {
+        const move = [0, 0, 0];
+        move[i] = piles[i] - target;
+        return move;
+      }
+    }
+  }
+
+  function nimRandomMove() {
+    const nonEmpty = piles.map((v, i) => i).filter(i => piles[i] > 0);
+    const i = nonEmpty[Math.floor(Math.random() * nonEmpty.length)];
+    const take = Math.floor(Math.random() * piles[i]) + 1;
+    const move = [0, 0, 0];
+    move[i] = take;
+    return move;
+  }
+
+  function aiMove() {
+    const move = difficulty === 'hard' ? nimOptimalMove() : nimRandomMove();
+    applyMove(move);
+
+    const pileIdx = move.findIndex(v => v > 0);
+    const took = move[pileIdx];
+
+    if (checkWin()) {
+      setStatus('lose', `AI 从第 ${pileIdx + 1} 堆取走了 ${took} 颗，AI 赢了！`);
+      gameOver = true;
+      renderPiles();
+      return;
+    }
+
+    playerTurn = true;
+    setStatus('player-turn', `AI 从第 ${pileIdx + 1} 堆取走了 ${took} 颗 — 轮到你了`);
+    renderPiles();
+  }
+
+  function setStatus(cls, html) {
+    const el = document.getElementById('status');
+    el.className = 'status-bar ' + cls;
+    el.innerHTML = html;
+  }
+
+  resetGame();
+</script>
+</body>
+</html>
