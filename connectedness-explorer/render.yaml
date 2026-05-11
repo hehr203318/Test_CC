@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: connectedness-explorer
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
