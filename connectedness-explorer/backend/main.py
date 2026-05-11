@@ -6,7 +6,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .routers.analyze import router as analyze_router
-from .routers.ai_assess import router as ai_assess_router
 from .engine.data_loader import load_gdp_data
 
 DATA_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "quarterly_gdp.csv")
@@ -29,7 +28,6 @@ app.add_middleware(
 )
 
 app.include_router(analyze_router, prefix="/api")
-app.include_router(ai_assess_router, prefix="/api")
 
 if os.path.isdir(FRONTEND_DIST):
     app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")

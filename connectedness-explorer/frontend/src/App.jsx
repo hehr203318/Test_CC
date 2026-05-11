@@ -3,8 +3,6 @@ import CountrySelector from './components/CountrySelector'
 import LoadingAnimation from './components/LoadingAnimation'
 import ResultsTable from './components/ResultsTable'
 import NetworkGraph from './components/NetworkGraph'
-import AIAssessment from './components/AIAssessment'
-
 export default function App() {
   const [availableCountries, setAvailableCountries] = useState([])
   const [selectedCountries, setSelectedCountries] = useState([])
@@ -13,8 +11,6 @@ export default function App() {
   const [results, setResults] = useState(null)
   const [error, setError] = useState(null)
   const [activeTab, setActiveTab] = useState('table')
-  const [aiResult, setAiResult] = useState(null)
-  const [aiLoading, setAiLoading] = useState(false)
   const [selectorOpen, setSelectorOpen] = useState(true)
   const [showNetworkHint, setShowNetworkHint] = useState(false)
 
@@ -30,7 +26,6 @@ export default function App() {
     setLoading(true)
     setError(null)
     setResults(null)
-    setAiResult(null)
     setShowNetworkHint(false)
 
     try {
@@ -43,36 +38,13 @@ export default function App() {
       if (!res.ok) throw new Error(data.detail || 'Analysis failed')
       setResults(data)
       setActiveTab('table')
-      setSelectorOpen(false)       // collapse selector after results load
-      setShowNetworkHint(true)     // nudge user toward visualization
-      fetchAiAssessment(data)
+      setSelectorOpen(false)
+      setShowNetworkHint(true)
     } catch (e) {
       setError(e.message)
     } finally {
       setLoading(false)
     }
-  }
-
-  const fetchAiAssessment = async (data) => {
-    setAiLoading(true)
-    try {
-      const res = await fetch('/api/ai-assess', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          countries: data.gfevd_matrix.rows,
-          tci: data.tci,
-          net_rankings: data.net_rankings,
-          diagnostics: data.diagnostics,
-          gfevd_matrix: data.gfevd_matrix,
-        }),
-      })
-      if (res.ok) {
-        const d = await res.json()
-        setAiResult(d)
-      }
-    } catch (_) {}
-    setAiLoading(false)
   }
 
   const handleTabClick = (tab) => {
@@ -232,7 +204,6 @@ export default function App() {
               <NetworkGraph results={results} />
             )}
 
-            <AIAssessment loading={aiLoading} result={aiResult} />
           </section>
         )}
       </main>
