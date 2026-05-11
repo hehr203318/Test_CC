@@ -1,26 +1,19 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import * as d3 from 'd3'
 
-const REGION_COLORS = {
-  'East Asia': '#60a5fa',
-  'Southeast Asia': '#34d399',
-  'South Asia': '#a78bfa',
-  'Oceania': '#fb923c',
-  'Europe': '#f472b6',
-  'North America': '#facc15',
-  'Latin America': '#f87171',
-  'Middle East': '#e879f9',
-  'Africa': '#4ade80',
-  'Europe/Asia': '#c084fc',
-  'Other': '#94a3b8',
+const SHORT = {
+  'United States': 'USA',
+  'United Kingdom': 'UK',
+  'South Korea': 'S.Korea',
+  'Hong Kong SAR': 'HK SAR',
+  'Saudi Arabia': 'S.Arabia',
+  'South Africa': 'S.Africa',
+  'New Zealand': 'N.Zealand',
 }
+const shortName = name => SHORT[name] || name.split(' ').slice(0, 2).join(' ')
 
 export default function NetworkGraph({ results }) {
   const svgRef = useRef(null)
-  const [shockLog, setShockLog] = useState([])
-  const [activeNode, setActiveNode] = useState(null)
-  const simulationRef = useRef(null)
-  const nodesRef = useRef([])
 
   const { gfevd_matrix, net_rankings, edge_threshold } = results
   const countries = gfevd_matrix.rows
@@ -33,319 +26,295 @@ export default function NetworkGraph({ results }) {
   useEffect(() => {
     const container = svgRef.current?.parentElement
     if (!container) return
-    const W = container.clientWidth || 700
-    const H = 520
+    const W = Math.max(container.clientWidth, 600)
+    const H = 650
 
     const svg = d3.select(svgRef.current)
     svg.selectAll('*').remove()
     svg.attr('width', W).attr('height', H).attr('class', 'network-svg rounded-xl')
 
-    // Defs: arrowhead marker
+    // ── Defs ──────────────────────────────────────────────────────────────
     const defs = svg.append('defs')
     defs.append('marker')
       .attr('id', 'arrow')
-      .attr('viewBox', '0 -4 8 8')
-      .attr('refX', 8)
-      .attr('refY', 0)
-      .attr('markerWidth', 6)
-      .attr('markerHeight', 6)
-      .attr('orient', 'auto')
-      .append('path')
-      .attr('d', 'M0,-4L8,0L0,4')
-      .attr('fill', '#475569')
+      .attr('viewBox', '0 -4 8 8').attr('refX', 8).attr('refY', 0)
+      .attr('markerWidth', 5).attr('markerHeight', 5).attr('orient', 'auto')
+      .append('path').attr('d', 'M0,-4L8,0L0,4').attr('fill', '#64748b')
 
-    defs.append('marker')
-      .attr('id', 'arrow-active')
-      .attr('viewBox', '0 -4 8 8')
-      .attr('refX', 8)
-      .attr('refY', 0)
-      .attr('markerWidth', 6)
-      .attr('markerHeight', 6)
-      .attr('orient', 'auto')
-      .append('path')
-      .attr('d', 'M0,-4L8,0L0,4')
-      .attr('fill', '#60a5fa')
-
-    // Nodes and links
-    const nodes = countries.map((name, i) => ({
-      id: i,
-      name,
-      region: net_rankings[0]?.country === name ? net_rankings[0] : (metaByCountry[name] || {}),
+    // ── Data ──────────────────────────────────────────────────────────────
+    const simNodes = countries.map((name, i) => ({
+      id: i, name,
       net: metaByCountry[name]?.net ?? 0,
-      to: metaByCountry[name]?.to ?? 0,
-      from: metaByCountry[name]?.from ?? 0,
+      to:  metaByCountry[name]?.to  ?? 0,
+      from:metaByCountry[name]?.from?? 0,
     }))
-    nodesRef.current = nodes
 
-    // D[i][j] = how much of i's forecast error is from j's shock → edge goes j→i
-    const links = []
-    for (let i = 0; i < N; i++) {
-      for (let j = 0; j < N; j++) {
-        if (i !== j && D[i][j] > edge_threshold) {
-          links.push({ source: j, target: i, value: D[i][j] })
-        }
-      }
+    // D[i][j] = i receives from j  →  edge direction: j → i
+    // Use a lower visual threshold (half the GFEVD threshold) so sparse models still show edges.
+    // Additionally guarantee each node shows its top-2 outgoing connections.
+    const VIS_THRESHOLD = edge_threshold * 0.5
+    const linkSet = new Map()   // key: `${source}-${target}` → value object
+    const addLink = (src, tgt, val) => {
+      const key = `${src}-${tgt}`
+      if (!linkSet.has(key)) linkSet.set(key, { source: src, target: tgt, value: val })
     }
+    for (let i = 0; i < N; i++)
+      for (let j = 0; j < N; j++)
+        if (i !== j && D[i][j] > VIS_THRESHOLD)
+          addLink(j, i, D[i][j])
 
-    const nodeRadius = d => Math.max(18, Math.min(40, 14 + d.to * 0.3))
-    const nodeColor = d => {
-      const r = net_rankings.find(r => r.country === d.name)
-      const region = results.gfevd_matrix?.rows ? 'East Asia' : 'Other'
-      // Color by region from our available data
-      return d.net > 5 ? '#ef4444' : d.net < -5 ? '#3b82f6' : '#94a3b8'
+    // Guarantee top-2 outgoing per source node (j transmits to i with highest D[i][j])
+    for (let j = 0; j < N; j++) {
+      const outgoing = []
+      for (let i = 0; i < N; i++)
+        if (i !== j) outgoing.push({ src: j, tgt: i, val: D[i][j] })
+      outgoing.sort((a, b) => b.val - a.val)
+      outgoing.slice(0, 2).forEach(({ src, tgt, val }) => addLink(src, tgt, val))
     }
+    const linkData = [...linkSet.values()]
 
-    // Layer groups
-    const gLinks = svg.append('g').attr('class', 'links')
-    const gRipples = svg.append('g').attr('class', 'ripples')
-    const gPulses = svg.append('g').attr('class', 'pulses')
-    const gNodes = svg.append('g').attr('class', 'nodes')
+    const nodeR = d => Math.max(24, Math.min(46, 18 + d.to * 0.38))
 
-    // Draw links
+    // ── SVG layers ────────────────────────────────────────────────────────
+    const gLinks   = svg.append('g')
+    const gRipples = svg.append('g')
+    const gPulses  = svg.append('g')
+    const gNodes   = svg.append('g')
+
+    // ── Edges ─────────────────────────────────────────────────────────────
     const linkEls = gLinks.selectAll('line')
-      .data(links)
-      .join('line')
+      .data(linkData).join('line')
       .attr('stroke', '#334155')
-      .attr('stroke-width', d => Math.max(0.5, d.value / 25))
-      .attr('stroke-opacity', 0.6)
+      .attr('stroke-width', d => Math.max(1.5, d.value / 8))   // 2–9 px
+      .attr('stroke-opacity', 0.75)
       .attr('marker-end', 'url(#arrow)')
 
-    // Draw nodes
+    // ── Nodes ─────────────────────────────────────────────────────────────
     const nodeGroups = gNodes.selectAll('g')
-      .data(nodes)
-      .join('g')
+      .data(simNodes).join('g')
       .attr('cursor', 'pointer')
-      .call(
-        d3.drag()
-          .on('start', (event, d) => {
-            if (!event.active) simulation.alphaTarget(0.3).restart()
-            d.fx = d.x; d.fy = d.y
-          })
-          .on('drag', (event, d) => { d.fx = event.x; d.fy = event.y })
-          .on('end', (event, d) => {
-            if (!event.active) simulation.alphaTarget(0)
-            d.fx = null; d.fy = null
-          })
-      )
-      .on('click', (event, d) => triggerShockAnimation(d, nodes, gRipples, gPulses, linkEls))
-      .on('mouseover', (event, d) => showTooltip(event, d))
-      .on('mouseout', hideTooltip)
+      .call(d3.drag()
+        .on('start', (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y })
+        .on('drag',  (e, d) => { d.fx = e.x; d.fy = e.y })
+        .on('end',   (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null }))
+      .on('click', (e, d) => triggerShock(d))
+      .on('mouseover', showTip)
+      .on('mouseout', () => tip.classed('hidden', true))
 
+    // outer glow ring  (transmitter=green, receiver=red)
     nodeGroups.append('circle')
-      .attr('r', nodeRadius)
-      .attr('fill', d => d.net > 5 ? '#1d4ed8' : d.net < -5 ? '#1e3a5f' : '#1e293b')
-      .attr('stroke', d => d.net > 5 ? '#ef4444' : d.net < -5 ? '#3b82f6' : '#475569')
-      .attr('stroke-width', 2)
+      .attr('r', d => nodeR(d) + 5)
+      .attr('fill', 'none')
+      .attr('stroke', d => d.net > 5 ? '#22c55e40' : d.net < -5 ? '#ef444440' : '#47556940')
+      .attr('stroke-width', 4)
+
+    // body
+    nodeGroups.append('circle')
+      .attr('r', nodeR)
+      .attr('fill', d => d.net > 5 ? '#14291e' : d.net < -5 ? '#1e3a5f' : '#1e293b')
+      .attr('stroke', d => d.net > 5 ? '#22c55e' : d.net < -5 ? '#ef4444' : '#475569')
+      .attr('stroke-width', 2.5)
+
+    // abbreviated country name
+    nodeGroups.append('text')
+      .attr('text-anchor', 'middle').attr('dy', '-0.15em')
+      .attr('fill', '#e2e8f0').attr('font-size', 10).attr('font-weight', '600')
+      .attr('font-family', 'Inter, sans-serif').attr('pointer-events', 'none')
+      .text(d => shortName(d.name).split(' ')[0])
 
     nodeGroups.append('text')
-      .attr('text-anchor', 'middle')
-      .attr('dy', '0.3em')
-      .attr('fill', 'white')
-      .attr('font-size', d => nodeRadius(d) > 28 ? 10 : 8)
-      .attr('font-family', 'Inter, sans-serif')
-      .attr('pointer-events', 'none')
-      .text(d => d.name.split(' ').map(w => w[0]).join('').slice(0, 3))
+      .attr('text-anchor', 'middle').attr('dy', '0.95em')
+      .attr('fill', '#94a3b8').attr('font-size', 9)
+      .attr('font-family', 'Inter, sans-serif').attr('pointer-events', 'none')
+      .text(d => shortName(d.name).split(' ')[1] || '')
 
-    // NET label below node
+    // NET value below node
     nodeGroups.append('text')
       .attr('text-anchor', 'middle')
-      .attr('dy', d => nodeRadius(d) + 12)
-      .attr('fill', d => d.net > 0 ? '#fca5a5' : '#93c5fd')
-      .attr('font-size', 9)
-      .attr('font-family', 'Inter, sans-serif')
-      .attr('pointer-events', 'none')
+      .attr('dy', d => nodeR(d) + 15)
+      .attr('fill', d => d.net > 0 ? '#4ade80' : '#f87171')
+      .attr('font-size', 9).attr('font-weight', '600')
+      .attr('font-family', 'Inter, sans-serif').attr('pointer-events', 'none')
       .text(d => `${d.net > 0 ? '+' : ''}${d.net.toFixed(1)}`)
 
-    // Tooltip div
-    const tooltip = d3.select('body').append('div')
-      .attr('class', 'fixed hidden z-50 pointer-events-none bg-slate-900 border border-slate-600 rounded-xl px-4 py-3 text-xs text-slate-200 shadow-2xl max-w-xs')
-      .style('transition', 'opacity 0.15s')
+    // ── Tooltip ───────────────────────────────────────────────────────────
+    const tip = d3.select('body').append('div')
+      .classed('fixed hidden z-50 pointer-events-none bg-slate-900 border border-slate-600 rounded-xl px-4 py-3 text-xs text-slate-200 shadow-2xl', true)
 
-    function showTooltip(event, d) {
-      tooltip
-        .classed('hidden', false)
+    function showTip(event, d) {
+      tip.classed('hidden', false)
         .html(`
-          <div class="font-semibold text-white mb-1">${d.name}</div>
-          <div>TO: <span class="text-amber-400">${d.to.toFixed(1)}</span></div>
-          <div>FROM: <span class="text-amber-400">${d.from.toFixed(1)}</span></div>
-          <div>NET: <span class="${d.net > 0 ? 'text-red-400' : 'text-blue-400'} font-semibold">${d.net > 0 ? '+' : ''}${d.net.toFixed(1)}</span></div>
-          <div class="text-slate-400 mt-1 text-xs">Click to simulate shock</div>
+          <div class="font-semibold text-white mb-1.5">${d.name}</div>
+          <div class="flex gap-3">
+            <span>TO <b class="text-red-400">${d.to.toFixed(1)}</b></span>
+            <span>FROM <b class="text-blue-400">${d.from.toFixed(1)}</b></span>
+            <span>NET <b class="${d.net > 0 ? 'text-green-400' : 'text-red-400'}">${d.net > 0 ? '+' : ''}${d.net.toFixed(1)}</b></span>
+          </div>
+          <div class="text-slate-500 mt-1.5">Click to simulate shock propagation</div>
         `)
-        .style('left', (event.pageX + 12) + 'px')
-        .style('top', (event.pageY - 30) + 'px')
-    }
-    function hideTooltip() {
-      tooltip.classed('hidden', true)
+        .style('left', (event.pageX + 14) + 'px')
+        .style('top',  (event.pageY - 40) + 'px')
     }
 
-    // Force simulation
-    const simulation = d3.forceSimulation(nodes)
-      .force('link', d3.forceLink(links).id(d => d.id).distance(130).strength(0.4))
-      .force('charge', d3.forceManyBody().strength(-350))
-      .force('center', d3.forceCenter(W / 2, H / 2))
-      .force('collision', d3.forceCollide().radius(d => nodeRadius(d) + 15))
+    // ── Force simulation ──────────────────────────────────────────────────
+    const sim = d3.forceSimulation(simNodes)
+      .force('link',      d3.forceLink(linkData).id(d => d.id).distance(170).strength(0.3))
+      .force('charge',    d3.forceManyBody().strength(-550))
+      .force('center',    d3.forceCenter(W / 2, H / 2))
+      .force('collision', d3.forceCollide().radius(d => nodeR(d) + 20))
+      .force('x',         d3.forceX(W / 2).strength(0.04))
+      .force('y',         d3.forceY(H / 2).strength(0.04))
       .on('tick', () => {
+        // Clamp nodes within SVG bounds
+        simNodes.forEach(d => {
+          const r = nodeR(d) + 4
+          d.x = Math.max(r, Math.min(W - r, d.x))
+          d.y = Math.max(r, Math.min(H - r, d.y))
+        })
+
         linkEls
           .attr('x1', d => d.source.x)
           .attr('y1', d => d.source.y)
           .attr('x2', d => {
-            const r = nodeRadius(d.target)
-            const dx = d.target.x - d.source.x
-            const dy = d.target.y - d.source.y
-            const dist = Math.sqrt(dx * dx + dy * dy) || 1
-            return d.target.x - (dx / dist) * (r + 10)
+            const r = nodeR(d.target) + 11
+            const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y
+            const dist = Math.hypot(dx, dy) || 1
+            return d.target.x - dx / dist * r
           })
           .attr('y2', d => {
-            const r = nodeRadius(d.target)
-            const dx = d.target.x - d.source.x
-            const dy = d.target.y - d.source.y
-            const dist = Math.sqrt(dx * dx + dy * dy) || 1
-            return d.target.y - (dy / dist) * (r + 10)
+            const r = nodeR(d.target) + 11
+            const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y
+            const dist = Math.hypot(dx, dy) || 1
+            return d.target.y - dy / dist * r
           })
         nodeGroups.attr('transform', d => `translate(${d.x},${d.y})`)
       })
 
-    simulationRef.current = simulation
+    // ── Shock propagation ─────────────────────────────────────────────────
+    // Each edge gets its own max-hops budget based on its GFEVD value:
+    //   weakest edge above threshold → 3 hops
+    //   strongest edge in the network → 9 hops
+    //   others mapped linearly in between
+    // Visual brightness decays with remaining life fraction, so strong edges
+    // stay bright through hop 9 while weak edges dim and stop after hop 3.
+    const TRAVEL_MS = 700
+    const MAX_HOPS  = 9
+    const MIN_GFEVD = 3
+    const HOP_COLOR = hop => d3.interpolateRgb('#60a5fa', '#f472b6')(hop / MAX_HOPS)
 
-    function triggerShockAnimation(sourceNode, allNodes, gRipple, gPulse, linkEls) {
-      setActiveNode(sourceNode.name)
-      const srcIdx = sourceNode.id
-      const log = []
+    let maxGFEVD = 0
+    for (let i = 0; i < N; i++)
+      for (let j = 0; j < N; j++)
+        if (i !== j && D[i][j] > maxGFEVD) maxGFEVD = D[i][j]
+    maxGFEVD = Math.max(maxGFEVD, MIN_GFEVD + 0.1)
 
-      // Highlight source
-      gRipple.selectAll('*').remove()
-      gPulse.selectAll('*').remove()
+    // Map a GFEVD value → how many hops this edge lives (3–9)
+    const edgeLife = gval =>
+      Math.round(3 + 6 * Math.max(0, Math.min(1, (gval - MIN_GFEVD) / (maxGFEVD - MIN_GFEVD))))
 
-      // Flash source node
-      gRipple.append('circle')
-        .attr('cx', sourceNode.x).attr('cy', sourceNode.y)
-        .attr('r', nodeRadius(sourceNode))
-        .attr('fill', '#facc15').attr('opacity', 0.4)
-        .transition().duration(400).attr('opacity', 0).remove()
+    function triggerShock(clickedNode) {
+      gPulses.selectAll('*').remove()
+      gRipples.selectAll('*').remove()
+      ripple(clickedNode, 0, '#facc15')
+      runWave(0, new Set([clickedNode.id]))
+    }
 
-      // First wave
-      allNodes.forEach(target => {
-        if (target.id === srcIdx) return
-        // D[target][src] = how much of target's error is explained by source shock
-        const strength = D[target.id][srcIdx]
-        if (strength <= edge_threshold * 0.5) return
+    // sources: Set<nodeIdx> — nodes emitting this wave
+    function runWave(hop, sources) {
+      if (hop >= MAX_HOPS || sources.size === 0) return
 
-        log.push(`→ ${target.name}: ${strength.toFixed(1)}%`)
+      const color   = HOP_COLOR(hop)
+      const nextSet = new Set()
 
-        // Animate pulse circle traveling along edge
-        const pulse = gPulse.append('circle')
-          .attr('r', 6)
-          .attr('fill', '#60a5fa')
-          .attr('opacity', Math.min(0.9, strength / 60))
-          .attr('cx', sourceNode.x)
-          .attr('cy', sourceNode.y)
+      sources.forEach(fromIdx => {
+        const fromNode = simNodes.find(n => n.id === fromIdx)
+        if (!fromNode) return
 
-        pulse.transition()
-          .duration(900)
-          .ease(d3.easeCubicInOut)
-          .attr('cx', target.x)
-          .attr('cy', target.y)
-          .on('end', function () {
-            d3.select(this).remove()
-            // Ripple at target
-            for (let wave = 0; wave < 3; wave++) {
-              gRipple.append('circle')
-                .attr('cx', target.x).attr('cy', target.y)
-                .attr('r', nodeRadius(target))
-                .attr('fill', 'none')
-                .attr('stroke', '#60a5fa')
-                .attr('stroke-width', 2)
-                .attr('opacity', 0.8 * strength / 100)
-                .transition()
-                .duration(1200)
-                .delay(wave * 300)
-                .attr('r', nodeRadius(target) + 35 * Math.min(1, strength / 50))
-                .attr('opacity', 0)
-                .remove()
-            }
+        simNodes.forEach(target => {
+          if (target.id === fromIdx) return
+          const gval = D[target.id][fromIdx]
+          if (gval < MIN_GFEVD) return
 
-            // Second wave (attenuated)
-            allNodes.forEach(target2 => {
-              if (target2.id === srcIdx || target2.id === target.id) return
-              const strength2 = D[target2.id][target.id] * strength / 100
-              if (strength2 < 3) return
+          const life = edgeLife(gval)
+          if (hop >= life) return           // this edge has exhausted its hops
 
-              setTimeout(() => {
-                const pulse2 = gPulse.append('circle')
-                  .attr('r', 4)
-                  .attr('fill', '#818cf8')
-                  .attr('opacity', Math.min(0.7, strength2 / 40))
-                  .attr('cx', target.x).attr('cy', target.y)
+          // Remaining life fraction → drives size and opacity
+          const frac  = (life - hop) / life          // 1.0 at hop 0 → small near end
+          const r0    = Math.max(5, 22 * frac * Math.min(1.5, gval / 16))
+          const alpha = Math.max(0.28, 0.92 * frac)
 
-                pulse2.transition()
-                  .duration(700)
-                  .ease(d3.easeCubicInOut)
-                  .attr('cx', target2.x).attr('cy', target2.y)
-                  .on('end', function () {
-                    d3.select(this).remove()
-                    gRipple.append('circle')
-                      .attr('cx', target2.x).attr('cy', target2.y)
-                      .attr('r', nodeRadius(target2))
-                      .attr('fill', 'none')
-                      .attr('stroke', '#818cf8')
-                      .attr('stroke-width', 1.5)
-                      .attr('opacity', 0.5)
-                      .transition().duration(900)
-                      .attr('r', nodeRadius(target2) + 20)
-                      .attr('opacity', 0).remove()
-                  })
-              }, 600)
-            })
-          })
+          const pulse = gPulses.append('circle')
+            .attr('cx', fromNode.x).attr('cy', fromNode.y)
+            .attr('r', r0).attr('fill', color).attr('opacity', alpha)
+
+          pulse.transition()
+            .duration(TRAVEL_MS).ease(d3.easeCubicInOut)
+            .attr('cx', target.x).attr('cy', target.y)
+            .on('end', () => pulse.remove())
+
+          nextSet.add(target.id)
+        })
       })
 
-      setShockLog([`Shock from ${sourceNode.name}:`, ...log])
+      if (nextSet.size === 0) return
+
+      setTimeout(() => {
+        nextSet.forEach(idx => {
+          const node = simNodes.find(n => n.id === idx)
+          if (node) ripple(node, hop + 1, HOP_COLOR(hop + 1))
+        })
+        runWave(hop + 1, nextSet)
+      }, TRAVEL_MS + 60)
     }
 
-    return () => {
-      simulation.stop()
-      tooltip.remove()
+    function ripple(node, hop, color = '#60a5fa') {
+      const rings  = hop <= 2 ? 3 : hop <= 5 ? 2 : 1
+      const baseR  = nodeR(node)
+      const spread = Math.max(10, 45 * Math.pow(0.82, hop))
+      const alpha  = Math.max(0.28, 0.85 * Math.pow(0.88, hop))
+      const sw     = Math.max(1, 3.5 * Math.pow(0.82, hop))
+
+      for (let w = 0; w < rings; w++) {
+        gRipples.append('circle')
+          .attr('cx', node.x).attr('cy', node.y)
+          .attr('r', baseR).attr('fill', 'none')
+          .attr('stroke', color).attr('stroke-width', sw)
+          .attr('opacity', alpha)
+          .transition().duration(950).delay(w * 270)
+          .attr('r', baseR + spread)
+          .attr('opacity', 0)
+          .remove()
+      }
     }
+
+    return () => { sim.stop(); tip.remove() }
   }, [results])
 
   return (
     <div className="space-y-4">
       <div className="bg-slate-800 border border-slate-700 rounded-2xl overflow-hidden">
-        <div className="px-6 py-3 border-b border-slate-700 flex items-center justify-between">
+        <div className="px-6 py-3 border-b border-slate-700 flex items-center justify-between flex-wrap gap-2">
           <h3 className="font-serif text-lg text-white">Network Visualization</h3>
-          <div className="flex items-center gap-4 text-xs text-slate-400">
+          <div className="flex items-center gap-5 text-xs text-slate-400">
             <span className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-full bg-red-500 inline-block" /> Net Transmitter (NET &gt; 5)
+              <span className="w-2.5 h-2.5 rounded-full bg-green-500 inline-block" /> Net Transmitter
             </span>
             <span className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded-full bg-blue-500 inline-block" /> Net Receiver (NET &lt; -5)
+              <span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block" /> Net Receiver
             </span>
           </div>
         </div>
-        <div className="p-2">
-          <svg ref={svgRef} style={{ width: '100%', display: 'block' }} />
-        </div>
+
+        <svg ref={svgRef} style={{ width: '100%', display: 'block' }} />
+
         <div className="px-6 py-2 border-t border-slate-700 text-xs text-slate-500">
-          Click any node to simulate a GDP shock and watch spillovers propagate. Drag nodes to rearrange.
-          Edges shown where GFEVD &gt; {edge_threshold.toFixed(1)}%.
+          Click any node to simulate a GDP shock — pulses propagate up to 9 hops, shrinking and fading with each step.
+          Color shifts <span className="text-blue-400">blue</span> → <span className="text-pink-400">pink</span> as shocks travel further.
+          Edge width reflects spillover intensity.
         </div>
       </div>
 
-      {/* Shock log */}
-      {shockLog.length > 0 && (
-        <div className="bg-slate-800 border border-slate-700 rounded-xl px-5 py-4">
-          <p className="text-xs font-medium text-slate-300 mb-2">{shockLog[0]}</p>
-          <div className="flex flex-wrap gap-2">
-            {shockLog.slice(1).map((line, i) => (
-              <span key={i} className="px-2.5 py-1 rounded-lg bg-slate-700 text-xs text-blue-300">
-                {line}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* NET rankings mini bar */}
+      {/* NET rankings bar */}
       <div className="bg-slate-800 border border-slate-700 rounded-xl p-5">
         <h4 className="text-sm font-medium text-slate-300 mb-3">Net Spillover Rankings</h4>
         <div className="space-y-2">
@@ -355,26 +324,16 @@ export default function NetworkGraph({ results }) {
             return (
               <div key={r.country} className="flex items-center gap-3">
                 <div className="w-28 text-xs text-slate-300 text-right truncate">{r.country}</div>
-                <div className="flex-1 flex items-center gap-1">
-                  {r.net < 0 && (
-                    <div className="flex-1 flex justify-end">
-                      <div
-                        className="h-4 rounded bg-blue-600/70"
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                  )}
-                  <div className="w-px h-4 bg-slate-600 mx-1" />
-                  {r.net >= 0 && (
-                    <div className="flex-1">
-                      <div
-                        className="h-4 rounded bg-red-600/70"
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                  )}
+                <div className="flex-1 flex items-center">
+                  <div className="flex-1 flex justify-end pr-1">
+                    {r.net < 0 && <div className="h-3.5 rounded bg-red-600/70" style={{ width: `${pct}%` }} />}
+                  </div>
+                  <div className="w-px h-4 bg-slate-600" />
+                  <div className="flex-1 pl-1">
+                    {r.net >= 0 && <div className="h-3.5 rounded bg-green-600/70" style={{ width: `${pct}%` }} />}
+                  </div>
                 </div>
-                <div className={`w-14 text-xs font-semibold text-right ${r.net > 0 ? 'text-red-400' : 'text-blue-400'}`}>
+                <div className={`w-14 text-xs font-semibold text-right ${r.net > 0 ? 'text-green-400' : 'text-red-400'}`}>
                   {r.net > 0 ? '+' : ''}{r.net.toFixed(1)}
                 </div>
               </div>

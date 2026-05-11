@@ -15,6 +15,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('table')
   const [aiResult, setAiResult] = useState(null)
   const [aiLoading, setAiLoading] = useState(false)
+  const [selectorOpen, setSelectorOpen] = useState(true)
+  const [showNetworkHint, setShowNetworkHint] = useState(false)
 
   useEffect(() => {
     fetch('/api/countries')
@@ -29,6 +31,7 @@ export default function App() {
     setError(null)
     setResults(null)
     setAiResult(null)
+    setShowNetworkHint(false)
 
     try {
       const res = await fetch('/api/analyze', {
@@ -40,6 +43,8 @@ export default function App() {
       if (!res.ok) throw new Error(data.detail || 'Analysis failed')
       setResults(data)
       setActiveTab('table')
+      setSelectorOpen(false)       // collapse selector after results load
+      setShowNetworkHint(true)     // nudge user toward visualization
       fetchAiAssessment(data)
     } catch (e) {
       setError(e.message)
@@ -70,6 +75,11 @@ export default function App() {
     setAiLoading(false)
   }
 
+  const handleTabClick = (tab) => {
+    setActiveTab(tab)
+    if (tab === 'network') setShowNetworkHint(false)
+  }
+
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200 font-sans">
       {/* Header */}
@@ -84,36 +94,70 @@ export default function App() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-6 py-8 space-y-8">
-        {/* Controls */}
-        <section className="bg-slate-800 rounded-2xl p-6 border border-slate-700">
-          <CountrySelector
-            availableCountries={availableCountries}
-            selected={selectedCountries}
-            onChange={setSelectedCountries}
-          />
-
-          <div className="flex items-center gap-6 mt-6 pt-5 border-t border-slate-700">
+      <main className="max-w-7xl mx-auto px-6 py-8 space-y-6">
+        {/* Controls — collapsible */}
+        <section className="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden">
+          {/* Section header — always visible */}
+          <button
+            onClick={() => setSelectorOpen(o => !o)}
+            className="w-full flex items-center justify-between px-6 py-4 hover:bg-slate-700/40 transition-colors"
+          >
             <div className="flex items-center gap-3">
-              <label className="text-sm text-slate-400 whitespace-nowrap">Lag Order p</label>
-              <select
-                value={lagOrder}
-                onChange={e => setLagOrder(Number(e.target.value))}
-                className="bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                {[1, 2, 3, 4].map(n => (
-                  <option key={n} value={n}>p = {n}</option>
-                ))}
-              </select>
+              <span className="font-medium text-white text-sm">Country Selection</span>
+              {selectedCountries.length > 0 && (
+                <span className="flex gap-1 flex-wrap">
+                  {selectedCountries.map(c => (
+                    <span key={c} className="px-2 py-0.5 rounded-full bg-blue-600/30 text-blue-300 text-xs border border-blue-700/50">
+                      {c.split(' ')[0]}
+                    </span>
+                  ))}
+                </span>
+              )}
             </div>
+            <span className="text-slate-400 text-lg leading-none transition-transform duration-200"
+              style={{ transform: selectorOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}>
+              ▾
+            </span>
+          </button>
 
-            <button
-              onClick={handleAnalyze}
-              disabled={selectedCountries.length !== 6 || loading}
-              className="ml-auto px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium text-sm transition-colors shadow-lg shadow-blue-900/30"
-            >
-              {loading ? 'Analyzing…' : `Analyze ${selectedCountries.length}/6 Selected`}
-            </button>
+          {/* Collapsible body */}
+          <div
+            style={{
+              maxHeight: selectorOpen ? '600px' : '0px',
+              transition: 'max-height 0.3s ease-in-out',
+              overflow: 'hidden',
+            }}
+          >
+            <div className="px-6 pb-6">
+              <CountrySelector
+                availableCountries={availableCountries}
+                selected={selectedCountries}
+                onChange={setSelectedCountries}
+              />
+
+              <div className="flex items-center gap-6 mt-6 pt-5 border-t border-slate-700">
+                <div className="flex items-center gap-3">
+                  <label className="text-sm text-slate-400 whitespace-nowrap">Lag Order p</label>
+                  <select
+                    value={lagOrder}
+                    onChange={e => setLagOrder(Number(e.target.value))}
+                    className="bg-slate-700 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {[1, 2, 3, 4].map(n => (
+                      <option key={n} value={n}>p = {n}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  onClick={handleAnalyze}
+                  disabled={selectedCountries.length !== 6 || loading}
+                  className="ml-auto px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium text-sm transition-colors shadow-lg shadow-blue-900/30"
+                >
+                  {loading ? 'Analyzing…' : `Analyze ${selectedCountries.length}/6 Selected`}
+                </button>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -155,12 +199,30 @@ export default function App() {
               {['table', 'network'].map(tab => (
                 <button
                   key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`pb-2 text-sm font-medium capitalize transition-colors ${activeTab === tab ? 'tab-active' : 'text-slate-400 hover:text-slate-200'}`}
+                  onClick={() => handleTabClick(tab)}
+                  className={`relative pb-2 text-sm font-medium transition-colors ${activeTab === tab ? 'tab-active' : 'text-slate-400 hover:text-slate-200'}`}
                 >
                   {tab === 'table' ? 'Connectedness Table' : 'Network Visualization'}
+
+                  {/* Hint badge — only on the network tab, only after first analysis */}
+                  {tab === 'network' && showNetworkHint && (
+                    <span className="absolute -top-2 -right-3 flex items-center gap-1">
+                      {/* pulsing dot */}
+                      <span className="relative flex h-2.5 w-2.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-500" />
+                      </span>
+                    </span>
+                  )}
                 </button>
               ))}
+
+              {/* Animated tooltip pointing at the Network tab */}
+              {showNetworkHint && (
+                <div className="ml-2 flex items-center gap-1.5 text-xs text-blue-400 animate-pulse pb-2">
+                  ← Click to explore the interactive shock simulation
+                </div>
+              )}
             </div>
 
             {activeTab === 'table' && (
