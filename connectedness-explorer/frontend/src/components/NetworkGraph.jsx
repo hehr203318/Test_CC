@@ -14,7 +14,6 @@ const shortName = name => SHORT[name] || name.split(' ').slice(0, 2).join(' ')
 
 export default function NetworkGraph({ results }) {
   const svgRef = useRef(null)
-  const hintRef = useRef(null)
 
   const { gfevd_matrix, net_rankings, edge_threshold } = results
   const countries = gfevd_matrix.rows
@@ -191,6 +190,25 @@ export default function NetworkGraph({ results }) {
         nodeGroups.attr('transform', d => `translate(${d.x},${d.y})`)
       })
 
+    // ── Click hint (removed on first shock) ──────────────────────────────
+    const gHint = svg.append('g').attr('class', 'click-hint')
+    const hintW = 270, hintH = 34, hintX = W / 2, hintY = H - 28
+    gHint.append('rect')
+      .attr('x', hintX - hintW / 2).attr('y', hintY - hintH / 2)
+      .attr('width', hintW).attr('height', hintH).attr('rx', 17)
+      .attr('fill', 'rgba(15,23,42,0.78)').attr('stroke', '#3b82f6').attr('stroke-width', 1)
+    gHint.append('text')
+      .attr('x', hintX).attr('y', hintY)
+      .attr('text-anchor', 'middle').attr('dominant-baseline', 'central')
+      .attr('fill', '#93c5fd').attr('font-size', '13px').attr('font-family', 'sans-serif')
+      .text('↑ Click any country node to simulate a shock')
+    // Pulse opacity
+    ;(function pulse() {
+      gHint.transition().duration(900).attr('opacity', 0.45)
+        .transition().duration(900).attr('opacity', 1)
+        .on('end', pulse)
+    })()
+
     // ── Shock propagation ─────────────────────────────────────────────────
     // Each edge gets its own max-hops budget based on its GFEVD value:
     //   weakest edge above threshold → 3 hops
@@ -214,7 +232,7 @@ export default function NetworkGraph({ results }) {
       Math.round(3 + 6 * Math.max(0, Math.min(1, (gval - MIN_GFEVD) / (maxGFEVD - MIN_GFEVD))))
 
     function triggerShock(clickedNode) {
-      if (hintRef.current) hintRef.current.style.display = 'none'
+      gHint.interrupt().remove()
       gPulses.selectAll('*').remove()
       gRipples.selectAll('*').remove()
       ripple(clickedNode, 0, '#facc15')
@@ -307,18 +325,7 @@ export default function NetworkGraph({ results }) {
           </div>
         </div>
 
-        <div className="relative">
-          <svg ref={svgRef} style={{ width: '100%', display: 'block' }} />
-          {/* Click hint — hidden after first node click */}
-          <div ref={hintRef} className="absolute inset-0 flex items-end justify-center pb-16 pointer-events-none">
-            <div className="flex items-center gap-2 bg-slate-900/75 backdrop-blur-sm border border-blue-700/50 rounded-full px-4 py-2 text-sm text-blue-300 animate-pulse shadow-lg">
-              <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                <path d="M6.672 1.911a1 1 0 10-1.932.518l.259.966a1 1 0 001.932-.518l-.26-.966zM2.429 4.74a1 1 0 10-.517 1.932l.966.259a1 1 0 00.517-1.932l-.966-.26zm8.814-.569a1 1 0 00-1.415-1.414l-.707.707a1 1 0 101.415 1.415l.707-.708zm-7.071 7.072l.707-.707A1 1 0 003.465 9.12l-.708.707a1 1 0 001.415 1.415zm3.2-5.171a1 1 0 00-1.3 1.3l4 10a1 1 0 001.823.075l1.38-2.759 3.018 3.02a1 1 0 001.414-1.415l-3.019-3.02 2.76-1.379a1 1 0 00-.076-1.822l-10-4z"/>
-              </svg>
-              Click any country node to simulate a shock
-            </div>
-          </div>
-        </div>
+        <svg ref={svgRef} style={{ width: '100%', display: 'block' }} />
 
         <div className="px-6 py-2 border-t border-slate-700 text-xs text-slate-500">
           Click any node to simulate a GDP shock — pulses propagate up to 9 hops, shrinking and fading with each step.
